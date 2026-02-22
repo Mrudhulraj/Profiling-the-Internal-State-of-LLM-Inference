@@ -97,7 +97,7 @@ const Navbar = () => {
                     onClick={() => router.push('/')}
                 >
                     <img
-                        src={'/Assets/Blue_logo.png'}
+                        src={'/Assets/LLM_Inference_logo.png'}
                         className="w-[3rem] rounded-full"
                         onLoad={() => setLoaded(true)}
                     />
