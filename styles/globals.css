@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+    font-family: 'Anita';
+    src: url('/Anita/Anita_semi_square.ttf');
+}
+
+@font-face {
+    font-family: 'Montserrat';
+    src: url('/Montserrat/Montserrat-VariableFont_wght.ttf');
+}
+
+@font-face {
+    font-family: 'Poppins';
+    src: url('/Poppins/Poppins-Medium.ttf');
+}
+
+@font-face {
+    font-family: 'Masiku';
+    src: url('/Masiku.ttf');
+}
+
+@font-face {
+    font-family: 'Archivo Black';
+    src: url('/archivo-black-cufonfonts/ArchivoBlack-Regular.ttf');
+}
+
+@font-face {
+    font-family: 'Roboto';
+    src: url('/Roboto/Roboto-Medium.ttf');
+}
+
+body {
+    font-family: 'Poppins';
+    background-color: #101012;
+    color: white;
+    scroll-behavior: smooth;
+}
+
+/* Chrome, Safari, Edge, Opera */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+/* Firefox */
+input[type='number'] {
+    -moz-appearance: textfield;
+}
+
+@layer components {
+    .inputContainer {
+        @apply mt-4 flex flex-col items-start space-y-2;
+    }
+
+    .inputStyle {
+        @apply w-full rounded-md bg-gray-100/80 p-2 text-black;
+    }
+
+    .gameDropdownStyle {
+        @apply flex cursor-pointer items-center justify-between rounded-md border px-2 py-1 lg:hidden;
+    }
+
+    .playerContainer {
+        @apply mx-auto flex h-[100px] w-full cursor-pointer items-center justify-center space-x-3 whitespace-nowrap rounded-xl border-blue-500 bg-[#292630] px-4 text-[18px] font-semibold transition duration-300 hover:scale-110 hover:border-2 md:mx-[0px];
+    }
+
+    .playerInput {
+        @apply w-full rounded-[6px] border-none bg-[#292630] p-4 outline-none;
+    }
+}
