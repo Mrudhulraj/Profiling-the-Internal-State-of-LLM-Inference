@@ -1,0 +1,348 @@
+/*
+Copyright 2025 The llm-d-inference-sim Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+package kvcache
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/go-logr/logr"
+	"github.com/llm-d/llm-d-inference-sim/pkg/common"
+	"github.com/llm-d/llm-d-inference-sim/pkg/common/logging"
+	"github.com/llm-d/llm-d-kv-cache/pkg/kvcache/kvblock"
+)
+
+const (
+	capacityError      = "the kv cache does not have sufficient capacity to store this request"
+	delay              = time.Second
+	topicNamePrefix    = "kv"
+	topicNameSeparator = "@"
+)
+
+// blockCache represents a thread-safe cache for blocks with eviction policy
+type blockCache struct {
+	mu              sync.RWMutex
+	requestToBlocks map[string][]kvblock.BlockHash     // request id -> array of it blocks (block hashes)
+	usedBlocks      map[kvblock.BlockHash]int          // block hash -> reference count
+	unusedBlocks    map[kvblock.BlockHash]time.Time    // block hash -> last usage timestamp
+	blockToTokens   map[kvblock.BlockHash][]uint32     // block hash -> block tokens
+	maxBlocks       int                                // maximum number of blocks in the cache
+	eventSender     *KVEventSender                     // emmits kv events
+	eventChan       common.Channel[EventData]          // channel for asynchronous event processing
+	usageChan       *common.Channel[common.MetricInfo] // channel for usage reporting
+	logger          logr.Logger
+	disabled        bool // indicated whether the cache is disabled
+}
+
+// newBlockCache creates a new blockCache with the specified maximum number of blocks
+func newBlockCache(config *common.Configuration, logger logr.Logger,
+	usageChan *common.Channel[common.MetricInfo]) (*blockCache, error) {
+	if config.IP == "" {
+		return nil, errors.New("IP should be defined in the environment (POD_IP)")
+	}
+
+	// TODO read size of channel from config
+	eChan := common.Channel[EventData]{
+		Channel: make(chan EventData, 10000),
+		Name:    "block cache eventChan",
+	}
+
+	var publisher *common.Publisher
+	var err error
+	if config.ZMQEndpoint != "" {
+		publisher, err = common.NewPublisher(config.ZMQEndpoint, uint(config.ZMQMaxConnectAttempts))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	eventSender := NewKVEventSender(publisher, CreateKVEventsTopic(config.IP, config.Model),
+		eChan, config.EventBatchSize, delay, logger)
+
+	return &blockCache{
+		requestToBlocks: make(map[string][]kvblock.BlockHash),
+		usedBlocks:      make(map[kvblock.BlockHash]int),
+		unusedBlocks:    make(map[kvblock.BlockHash]time.Time),
+		blockToTokens:   make(map[kvblock.BlockHash][]uint32),
+		maxBlocks:       config.KVCacheSize,
+		eventChan:       eChan,
+		usageChan:       usageChan,
+		eventSender:     eventSender,
+		logger:          logger,
+	}, nil
+}
+
+func (bc *blockCache) start(ctx context.Context) {
+	bc.logger.V(logging.INFO).Info("Starting KV cache")
+	err := bc.eventSender.Run(ctx)
+	if err != nil {
+		bc.logger.Error(err, "Sender stopped with error")
+	}
+}
+
+func (bc *blockCache) discard() {
+	bc.logger.V(logging.INFO).Info("Discarding KV cache")
+
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+
+	bc.disabled = true
+
+	bc.requestToBlocks = make(map[string][]kvblock.BlockHash)
+	bc.usedBlocks = make(map[kvblock.BlockHash]int)
+	bc.unusedBlocks = make(map[kvblock.BlockHash]time.Time)
+
+	common.WriteToChannel(bc.eventChan,
+		EventData{action: eventActionAllBlocksCleared},
+		bc.logger)
+}
+
+func (bc *blockCache) activate() {
+	bc.logger.V(logging.INFO).Info("Activating KV cache")
+
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+
+	bc.disabled = false
+}
+
+// startRequest adds a request with its associated block hashes to the cache
+// and returns the number of blocks that were already in the cache
+func (bc *blockCache) startRequest(requestID string, blockHashes []kvblock.BlockHash, blockTokens [][]uint32) (int, error) {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+
+	if bc.disabled {
+		bc.logger.V(logging.TRACE).Info("KV cache is disabled, request is not added to the kv cache")
+		return 0, nil
+	}
+
+	if _, exists := bc.requestToBlocks[requestID]; exists {
+		// request with the same id already exists
+		return 0, fmt.Errorf("request already exists for id %s", requestID)
+	}
+
+	if len(blockHashes) != len(blockTokens) {
+		return 0, fmt.Errorf("invalid input parameters, %d block hashes, %d block tokens", len(blockHashes), len(blockTokens))
+	}
+
+	// divide list of blocks to three lists:
+	// blockAreadyInUse - blocks, which are already used by currently running request
+	// blockToMoveToUsed - blocks, which were used in past
+	// blocksToAdd - new blocks
+	blocksToAdd := make([]kvblock.BlockHash, 0)
+	blockToMoveToUsed := make([]kvblock.BlockHash, 0)
+	blockAreadyInUse := make([]kvblock.BlockHash, 0)
+
+	// first step - ensure that there is enough space for all blocks
+	// count number of new blocks + number of blocks that are in the unused blocks
+	// don't update the data until we are sure that it's ok
+	for i, blockHash := range blockHashes {
+		if _, exists := bc.unusedBlocks[blockHash]; exists {
+			blockToMoveToUsed = append(blockToMoveToUsed, blockHash)
+		} else if _, exists := bc.usedBlocks[blockHash]; !exists {
+			blocksToAdd = append(blocksToAdd, blockHash)
+		} else {
+			blockAreadyInUse = append(blockAreadyInUse, blockHash)
+		}
+
+		// store block tokens if doesnot in the cache
+		if _, exists := bc.blockToTokens[blockHash]; !exists {
+			bc.blockToTokens[blockHash] = blockTokens[i]
+		}
+	}
+
+	if len(bc.usedBlocks)+len(blocksToAdd)+len(blockToMoveToUsed) > bc.maxBlocks {
+		return 0, errors.New(capacityError)
+	}
+
+	// for blocks that are already in use - update the reference
+	for _, block := range blockAreadyInUse {
+		bc.usedBlocks[block] += 1
+	}
+
+	// for block used in the past - move them to the used blocks collection
+	for _, block := range blockToMoveToUsed {
+		bc.usedBlocks[block] = 1
+		delete(bc.unusedBlocks, block)
+	}
+
+	// for new block - add them, if there is no empty slots - evict the oldest block
+	// send all blocks as a single batch
+	hashes := []any{}
+	tokens := []uint32{}
+
+	for _, block := range blocksToAdd {
+		if len(bc.usedBlocks)+len(bc.unusedBlocks) == bc.maxBlocks {
+			// cache is full but contains unused blocks - evict the oldest
+			var oldestUnusedHash kvblock.BlockHash
+			oldestUnusedTime := time.Now()
+
+			for hash, t := range bc.unusedBlocks {
+				if t.Before(oldestUnusedTime) {
+					oldestUnusedHash = hash
+					oldestUnusedTime = t
+				}
+			}
+
+			delete(bc.unusedBlocks, oldestUnusedHash)
+			common.WriteToChannel(bc.eventChan,
+				EventData{action: eventActionRemove, hashes: []any{oldestUnusedHash}, tokens: bc.blockToTokens[oldestUnusedHash]},
+				bc.logger)
+			// remove this block hash from the cache of block tokens
+			delete(bc.blockToTokens, oldestUnusedHash)
+		}
+
+		// Add the new block
+		bc.usedBlocks[block] = 1
+
+		hashes = append(hashes, block)
+		tokens = append(tokens, bc.blockToTokens[block]...)
+	}
+
+	if len(hashes) > 0 {
+		common.WriteToChannel(bc.eventChan, EventData{action: eventActionStore, hashes: hashes, tokens: tokens}, bc.logger)
+	}
+
+	// store the request mapping
+	bc.requestToBlocks[requestID] = make([]kvblock.BlockHash, len(blockHashes))
+	copy(bc.requestToBlocks[requestID], blockHashes)
+
+	if bc.usageChan != nil {
+		usage := common.MetricInfo{
+			Value: float64(len(bc.usedBlocks)) / float64(bc.maxBlocks),
+		}
+		common.WriteToChannel(*bc.usageChan, usage, bc.logger)
+	}
+	return len(blockAreadyInUse) + len(blockToMoveToUsed), nil
+}
+
+// finishRequest processes the completion of a request, decreasing reference counts
+func (bc *blockCache) finishRequest(requestID string) error {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+
+	if bc.disabled {
+		bc.logger.V(logging.TRACE).Info("KV cache is disabled, request completion is not processed by the kv cache")
+		return nil
+	}
+
+	// Get blocks associated with this request
+	blockHashes, exists := bc.requestToBlocks[requestID]
+	if !exists {
+		return nil
+	}
+
+	now := time.Now()
+
+	// Decrease reference count for each block
+	errBlocks := make([]kvblock.BlockHash, 0)
+	for _, blockHash := range blockHashes {
+		if refCount, exists := bc.usedBlocks[blockHash]; exists {
+			if refCount > 1 {
+				// this block is in use by another request, just update reference count
+				bc.usedBlocks[blockHash] = refCount - 1
+			} else {
+				// this was the last block usage - move this block to unused
+				bc.unusedBlocks[blockHash] = now
+				delete(bc.usedBlocks, blockHash)
+			}
+		} else {
+			errBlocks = append(errBlocks, blockHash)
+		}
+	}
+
+	if bc.usageChan != nil {
+		usage := common.MetricInfo{
+			Value: float64(len(bc.usedBlocks)) / float64(bc.maxBlocks),
+		}
+		common.WriteToChannel(*bc.usageChan, usage, bc.logger)
+	}
+
+	// Remove the request mapping
+	delete(bc.requestToBlocks, requestID)
+
+	if len(errBlocks) > 0 {
+		errMsg := "Not existing blocks "
+		for _, b := range errBlocks {
+			errMsg += fmt.Sprintf("%d, ", b)
+		}
+		return fmt.Errorf("%s for request %s", errMsg[:len(errMsg)-2], requestID)
+	}
+
+	return nil
+}
+
+// GetStats returns current cache statistics (for testing/debugging)
+func (bc *blockCache) getStats() (int, int, int) {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
+
+	return len(bc.requestToBlocks), len(bc.usedBlocks) + len(bc.unusedBlocks), len(bc.unusedBlocks)
+}
+
+// getBlockInfo returns reference count and if it's in the cache for a specific block (for testing)
+// if block is in use by currently running requests the count will be positive, boolean is true
+// if block is in the unused list - count is 0, boolean is true
+// if block is not in both collections - count is 0, boolean is false
+func (bc *blockCache) getBlockInfo(blockHash kvblock.BlockHash) (int, bool) {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
+
+	refCount, exists := bc.usedBlocks[blockHash]
+	if exists {
+		return refCount, true
+	}
+	_, exists = bc.unusedBlocks[blockHash]
+	if exists {
+		return 0, true
+	}
+
+	return 0, false
+}
+
+// countCachedBlockPrefix returns the number of continuous blocks from the given list that are already in the cache
+func (bc *blockCache) countCachedBlockPrefix(blockHashes []kvblock.BlockHash) int {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
+
+	if bc.disabled {
+		return 0
+	}
+
+	var count int
+	for _, blockHash := range blockHashes {
+		// Check if block is in used blocks (currently in use by running requests)
+		if _, exists := bc.usedBlocks[blockHash]; exists {
+			count++
+		} else if _, exists := bc.unusedBlocks[blockHash]; exists {
+			// Check if block is in unused blocks (was used in past)
+			count++
+		} else {
+			// return count once a block is not found in the cache
+			return count
+		}
+	}
+	return count
+}
+
+// ZMQ topic format is: kv@<pod-ip>@<model-name>
+func CreateKVEventsTopic(ip string, model string) string {
+	return topicNamePrefix + topicNameSeparator + ip + topicNameSeparator + model
+}

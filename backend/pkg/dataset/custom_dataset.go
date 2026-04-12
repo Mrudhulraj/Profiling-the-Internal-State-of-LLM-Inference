@@ -1,0 +1,176 @@
+/*
+Copyright 2025 The llm-d-inference-sim Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package dataset
+
+import (
+	"context"
+	"encoding/hex"
+	"errors"
+
+	"github.com/go-logr/logr"
+	"github.com/llm-d/llm-d-inference-sim/pkg/common"
+	"github.com/llm-d/llm-d-inference-sim/pkg/common/logging"
+	openaiserverapi "github.com/llm-d/llm-d-inference-sim/pkg/openai-server-api"
+	"github.com/llm-d/llm-d-inference-sim/pkg/tokenizer"
+)
+
+type CustomDataset struct {
+	DefaultDataset
+	sqliteHelper *sqliteHelper
+}
+
+func (d *CustomDataset) Init(ctx context.Context, logger logr.Logger, random *common.Random,
+	path string, tableName string, useInMemory bool, maxModelLen int, tokenizer tokenizer.Tokenizer) error {
+	if err := d.DefaultDataset.Init(ctx, logger, random, maxModelLen, tokenizer); err != nil {
+		return err
+	}
+	if path == "" {
+		return errors.New("no dataset path provided")
+	}
+
+	d.sqliteHelper = newSqliteHelper(tableName, logger)
+	d.logger.V(logging.INFO).Info("Using dataset from", "path", path)
+	return d.sqliteHelper.connectToDB(path, useInMemory)
+}
+
+func (d *CustomDataset) getPromptHash(req openaiserverapi.Request) []byte {
+	return getInputHash(req.TokenizedPrompt().Tokens)
+}
+
+func (d *CustomDataset) getPromptHashHex(hashBytes []byte) string {
+	return hex.EncodeToString(hashBytes)
+}
+
+// categorizeResponses receives list of responses tokens and maximum response length
+// categorize responses to three collections:
+// - shorter or equal length to maxLen
+// - exact maxLen length
+// - longer than maxLen
+func (d *CustomDataset) categorizeResponses(responses []openaiserverapi.Tokenized, maxLen int) (shorterOrEqLen []openaiserverapi.Tokenized,
+	equalLen []openaiserverapi.Tokenized, longerLen []openaiserverapi.Tokenized) {
+	for _, respTokens := range responses {
+		switch {
+		case respTokens.Length() == maxLen:
+			shorterOrEqLen = append(shorterOrEqLen, respTokens)
+			equalLen = append(equalLen, respTokens)
+		case respTokens.Length() < maxLen:
+			shorterOrEqLen = append(shorterOrEqLen, respTokens)
+		default:
+			longerLen = append(longerLen, respTokens)
+		}
+	}
+	return
+}
+
+// getRandomResponse returns a randomly selected element from the given array, array is not empty
+func (d *CustomDataset) getRandomResponse(responses []openaiserverapi.Tokenized) openaiserverapi.Tokenized {
+	return responses[d.random.RandomInt(0, len(responses)-1)]
+}
+
+// GetResponseTokens returns tokens and finishReason for the given request:
+// Calculate maximum length of response (basedon max-tokens or max-completions-tokens or model-len)
+// If dataset contains responses for the given prompt, and there are responses with length <=
+// max response length - use random one from the list,
+// otherwise select random one from the longer responses and trim it as required
+// If no responses were found in the dataset for the given prompt,
+// get random record fromn the dataset with response length equal or lower than max response length,
+// if there is no records shorter/equal to max length - get random response from the dataset
+// and trim it to the required length
+// if ignore_eos=true the response always will have the max response len tokens, missing tokens
+// are randomly selected from the hard-coded collection
+func (d *CustomDataset) GetResponseTokens(req openaiserverapi.Request) (*openaiserverapi.Tokenized, string, error) {
+	maxResponseLen, _ := d.calculateResponseMaxLen(req)
+	var responseTokens openaiserverapi.Tokenized
+
+	// get all records for the hashes prompt
+	promptHash := d.getPromptHash(req)
+	promptHashHex := d.getPromptHashHex(promptHash)
+	responses, err := d.sqliteHelper.getResponsesForPrompt(promptHashHex)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if len(responses) > 0 {
+		// has responses for the given request
+		d.logger.V(logging.TRACE).Info("Reponses were found in the dataset for the request's prompt")
+		shorterOrEqLenResponses, equalLenResponses, longerLenResponses := d.categorizeResponses(responses, maxResponseLen)
+
+		if req.GetIgnoreEOS() {
+			// must return response with exactly calculated max length
+			switch {
+			case len(equalLenResponses) > 0:
+				// has responses with required length - return randomly selected response
+				responseTokens = d.getRandomResponse(equalLenResponses)
+			case len(longerLenResponses) > 0:
+				// has responses longer than required - return randomly selected trimmed response
+				responseTokens = d.getRandomResponse(longerLenResponses)
+				responseTokens.Trim(maxResponseLen)
+			default:
+				// all responses are shorter than required, select randomly and pad with random tokens
+				responseTokens = d.getRandomResponse(shorterOrEqLenResponses)
+				responseTokens.Append(d.generatePresetRandomTokens(maxResponseLen - responseTokens.Length()))
+			}
+		} else {
+			// has responses for the request, return response shorter or equal to the maxReponsesLen
+			// finishReason = common.LengthFinishReason
+			if len(shorterOrEqLenResponses) > 0 {
+				// has responses shorter or equal length than required - return randomly selected response
+				responseTokens = d.getRandomResponse(shorterOrEqLenResponses)
+			} else {
+				// all responses are longer than required, use randomly selected trimmed response
+				responseTokens = d.getRandomResponse(longerLenResponses)
+				responseTokens.Trim(maxResponseLen)
+			}
+		}
+	} else {
+		// no responses for the given request
+		d.logger.V(logging.TRACE).Info("No responses in the dataset for the request's prompt")
+		// try to find a random response with number of tokens <= tokens limit
+		randomResponses, err := d.sqliteHelper.getResponsesForLen(maxResponseLen, req.GetIgnoreEOS())
+		if err != nil {
+			return nil, "", err
+		}
+		if len(randomResponses) == 0 {
+			// failed to get response with number of tokens <= tokensLimit, get response with any number of tokens
+			randomResponses, err = d.sqliteHelper.getRandomResponse()
+			if err != nil {
+				return nil, "", err
+			}
+			if len(randomResponses) == 0 {
+				// shouldn't happen
+				return nil, "", errors.New("Dataset is empty")
+			}
+		}
+		// if response has too much tokens, trim it
+		if randomResponses[0].Length() > maxResponseLen {
+			responseTokens = randomResponses[0]
+			responseTokens.Trim(maxResponseLen)
+		} else {
+			responseTokens = randomResponses[0]
+			if req.GetIgnoreEOS() {
+				responseTokens.Append(d.generatePresetRandomTokens(maxResponseLen - responseTokens.Length()))
+			}
+		}
+	}
+
+	finishReason := common.StopFinishReason
+	if responseTokens.Length() == maxResponseLen {
+		finishReason = common.LengthFinishReason
+	}
+
+	return &responseTokens, finishReason, nil
+}
