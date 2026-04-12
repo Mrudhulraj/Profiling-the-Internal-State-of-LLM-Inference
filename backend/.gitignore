@@ -1,0 +1,12 @@
+bin
+lib
+vendor
+.vscode
+.idea
+.devcontainer
+# MacOSX
+.DS_Store
+*.test
+manifests/dev-config.yaml
+pkg/llm-d-inference-sim/tests-tmp/
+zmq-listener/.venv

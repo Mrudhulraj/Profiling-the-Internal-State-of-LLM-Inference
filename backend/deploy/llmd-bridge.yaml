@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vllm-sim-monitor
+  namespace: monitoring
+  labels:
+    release: prom # MUST match the name from 'helm install prom ...'
+spec:
+  selector:
+    matchLabels:
+      app: vllm-sim # MUST match the label in your simulator deployment
+  namespaceSelector:
+    matchNames:
+      - default # The namespace where your simulator is
+  endpoints:
+  - port: default # The name of the port in your Service (check your YAML!)
+    path: /metrics
+    interval: 15s
