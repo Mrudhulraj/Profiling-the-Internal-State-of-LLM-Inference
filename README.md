@@ -1,4 +1,4 @@
-## Getting Started 
+## Getting Started with LLM Inference Benchmarking tool
 ### UI Setup Steps
 
 Install yarn:
