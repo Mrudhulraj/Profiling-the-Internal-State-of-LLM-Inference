@@ -309,6 +309,7 @@ const Home = () => {
                                                             search: UserSearchResult
                                                         ) => (
                                                             <UserSearch
+                                                                key={search.username}
                                                                 userSearchResult={
                                                                     search
                                                                 }
@@ -336,6 +337,7 @@ const Home = () => {
                                                             search: PostSearchResult
                                                         ) => (
                                                             <PostSearch
+                                                                key={search.id}
                                                                 postSearchResult={
                                                                     search
                                                                 }
@@ -438,6 +440,7 @@ const Home = () => {
                                     >
                                         {models.map((game) => (
                                             <div
+                                                key={game.name}
                                                 onClick={() =>
                                                     handleGameClick(game)
                                                 }

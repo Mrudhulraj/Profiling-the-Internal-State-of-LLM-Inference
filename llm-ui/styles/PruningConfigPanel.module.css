@@ -1,0 +1,204 @@
+/* PruningConfigPanel.module.css */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  padding: 20px;
+  background: #f9f9f9;
+  border-radius: 10px;
+}
+
+.container.disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.header h2 {
+  margin: 0 0 10px 0;
+  font-size: 1.8rem;
+  color: #333;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #666;
+}
+
+.warning {
+  padding: 15px;
+  background: #fff3cd;
+  border-left: 4px solid #ffc107;
+  border-radius: 5px;
+  color: #856404;
+}
+
+.configSection {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 30px;
+}
+
+.configGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.configGroup label {
+  font-weight: 600;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.methodButtons {
+  display: flex;
+  gap: 15px;
+}
+
+.methodBtn {
+  flex: 1;
+  padding: 15px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  background: white;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-weight: 600;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.methodBtn:hover:not(:disabled) {
+  border-color: #667eea;
+  background: #f0f4ff;
+}
+
+.methodBtn.active {
+  border-color: #667eea;
+  background: #667eea;
+  color: white;
+}
+
+.methodBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.methodDesc {
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.methodBtn.active .methodDesc {
+  opacity: 1;
+}
+
+.sliderContainer {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+}
+
+.slider {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: #e0e0e0;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #667eea;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #667eea;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.sliderValue {
+  min-width: 60px;
+  text-align: right;
+  font-weight: bold;
+  color: #667eea;
+  font-size: 1.1rem;
+}
+
+.inputContainer {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.numberInput {
+  padding: 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 5px;
+  font-size: 1rem;
+  width: 100px;
+}
+
+.numberInput:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.unit {
+  color: #999;
+  font-size: 0.95rem;
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #999;
+}
+
+.summary {
+  padding: 20px;
+  background: white;
+  border-radius: 8px;
+  border-left: 4px solid #667eea;
+}
+
+.summary h3 {
+  margin: 0 0 15px 0;
+  color: #333;
+}
+
+.summary ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.summary li {
+  padding: 8px 0;
+  color: #666;
+}
+
+.summary strong {
+  color: #333;
+}

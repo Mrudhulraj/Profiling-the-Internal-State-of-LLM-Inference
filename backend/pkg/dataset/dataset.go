@@ -29,17 +29,7 @@ import (
 
 // list of responses to use in random mode for completion requests
 var completionFakeResponses = []string{
-	`Testing@, #testing 1$ ,2%,3^, [4&*5], 6~, 7-_ + (8 : 9) / \ < > . `,
-	`Testing, testing 1,2,3. `,
-	`I am fine, how are you today? `,
-	`I am your AI assistant, how can I help you today? `,
-	`Today is a nice sunny day. `,
-	`The temperature here is twenty-five degrees centigrade. `,
-	`Today it is partially cloudy and raining. `,
-	`To be or not to be that is the question. `,
-	`Alas, poor Yorick! I knew him, Horatio: A fellow of infinite jest `,
-	`The rest is silence. `,
-	`Give a man a fish and you feed him for a day; teach a man to fish and you feed him for a lifetime `,
+	`The first author is: Zhendong Wang`,
 }
 
 type Dataset interface {
