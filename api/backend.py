@@ -196,6 +196,24 @@ def get_model_stats(model, model_id: str, model_type: str = "baseline") -> Model
     )
 
 
+def get_state_dict_file_size_mb(model) -> float:
+    """Measure serialized state_dict size without keeping an extra checkpoint."""
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            suffix=".pt",
+            dir=MODELS_DIR,
+            delete=False,
+        ) as temp_file:
+            temp_path = temp_file.name
+
+        torch.save(model.state_dict(), temp_path)
+        return os.path.getsize(temp_path) / (1024 ** 2)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
 def compare_models(baseline_stats: ModelStats, pruned_stats: ModelStats) -> Dict:
     """Compare baseline and pruned models."""
     comparison = {}
@@ -207,7 +225,7 @@ def compare_models(baseline_stats: ModelStats, pruned_stats: ModelStats) -> Dict
     comparison['parameter_reduction_percent'] = param_reduction
     
     # Size reduction
-    if baseline_stats.file_size_mb and pruned_stats.file_size_mb:
+    if baseline_stats.file_size_mb is not None and pruned_stats.file_size_mb is not None:
         size_reduction = (
             1 - pruned_stats.file_size_mb / baseline_stats.file_size_mb
         ) * 100
@@ -479,6 +497,10 @@ def execute_pruning(job_id: str, config: PruningConfig):
         # Load model
         model = loadModel(config.model_id)
         baseline_stats = get_model_stats(model, config.model_id, "baseline")
+        try:
+            baseline_stats.file_size_mb = get_state_dict_file_size_mb(model)
+        except Exception as e:
+            logger.warning(f"Could not measure baseline checkpoint size: {e}")
         
         # Compute perplexity on baseline
         tokenizer = AutoTokenizer.from_pretrained(config.model_id, trust_remote_code=True, use_fast=False)
@@ -515,15 +537,14 @@ def execute_pruning(job_id: str, config: PruningConfig):
         pruned_stats.metrics['perplexity'] = pruned_ppl
         pruned_stats.pruning_method = config.pruning_method
         pruned_stats.sparsity_rate = config.sparsity_rate
-        
-        # Compare models
-        comparison = compare_models(baseline_stats, pruned_stats)
-        
+
         # Save pruned model
         model_path = os.path.join(MODELS_DIR, f"{job_id}_pruned.pt")
         torch.save(pruned_model.state_dict(), model_path)
         pruned_stats.file_size_mb = os.path.getsize(model_path) / (1024 ** 2)
-        baseline_stats.file_size_mb = os.path.getsize(model_path) / (1024 ** 2)  # Approximation
+
+        # Compare after file sizes are populated so size reduction is accurate.
+        comparison = compare_models(baseline_stats, pruned_stats)
         
         # Update job
         job_tracker.update_job(

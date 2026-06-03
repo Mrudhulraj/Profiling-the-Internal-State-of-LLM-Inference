@@ -1,7 +1,6 @@
 import os
 import logging
 import torch
-import lm_eval
 from tqdm import tqdm
 
 
@@ -101,6 +100,8 @@ def eval_zero_shot(
     model_args = f"use_accelerate=True"
 
   logging.info(f"Testing tasks: {task_list}")
+  # Keep this import lazy so the API can boot without the full lm_eval task tree.
+  import lm_eval
   model_obj = lm_eval.models.huggingface.HFLM(pretrained=model)
   results = lm_eval.evaluator.simple_evaluate(
     model=model_obj,
