@@ -25,16 +25,39 @@ def evaluate_perplexity(
 ):
   # Divide the test dataset into samples of exactly seq_len tokens
   num_samples = input_ids.numel() // seq_len
+
+  # Guard: if input_ids is shorter than seq_len (common when called from second
+  # stage of pruning with only a handful of concatenated calibration samples),
+  # num_samples is 0 and the loop never runs, leaving nll_running as a plain
+  # Python int(0) whose .exp() raises "AttributeError: 'int' object has no
+  # attribute 'exp'".  We handle this by reducing seq_len to whatever we have.
+  if num_samples == 0:
+    actual_len = input_ids.shape[1]
+    if actual_len < 2:
+      raise ValueError(
+        f"evaluate_perplexity: input_ids has only {actual_len} tokens — "
+        "need at least 2.  Pass more calibration data."
+      )
+    logging.warning(
+      f"evaluate_perplexity: input_ids has {actual_len} tokens which is less "
+      f"than seq_len={seq_len}.  Falling back to seq_len={actual_len} for this "
+      "call (internal pruning evaluation — does not affect final perplexity)."
+    )
+    seq_len = actual_len
+    num_samples = 1
+
   data = []
   for i in range(num_samples):
     data.append(input_ids[:, i * seq_len : (i + 1) * seq_len])
 
-  # Running estimate of negative log-likelihood
-  nll_running = 0
+  # Running estimate of negative log-likelihood.
+  # Initialise as a float tensor so the weighted accumulation on the first
+  # iteration always stays in tensor-land (avoids the int + tensor edge case).
+  nll_running = torch.tensor(0.0, device=device)
   tokens_processed = 0
 
   if enable_tqdm:
-    ppl_range = tqdm(range(0, num_samples, batch_size), desc=f"Calculating perplexity")
+    ppl_range = tqdm(range(0, num_samples, batch_size), desc="Calculating perplexity")
   else:
     ppl_range = range(0, num_samples, batch_size)
 
@@ -51,7 +74,7 @@ def evaluate_perplexity(
     loss = torch.nn.functional.cross_entropy(
       shift_logits.reshape(-1, shift_logits.size(-1)), shift_labels.reshape(-1)
     )
-    # Calculate negative log likelihood
+    # Weighted running average of negative log-likelihood
     a = shift_labels.numel() / (tokens_processed + shift_labels.numel())
     b = tokens_processed / (tokens_processed + shift_labels.numel())
     nll_running = a * loss + b * nll_running

@@ -288,10 +288,10 @@ def two_stage_2ssp(model, calibration_dataset, pruning_rate, num_attn_submodules
     model.config.intermediate_size = num_preserve_mlp
 
     # 2. Second stage: pruning the Attention submodules
-    safe_samples = max(2, num_calibration_second_stage) 
-    calibration_input_ids = torch.cat(calibration_dataset[:safe_samples], dim=1)
+    # safe_samples = max(2, num_calibration_second_stage) 
+    # calibration_input_ids = torch.cat(calibration_dataset[:safe_samples], dim=1)
     
-    attnMask, mlpMask = second_stage_attention(model, num_prune=num_attn_submodules_to_prune, calibration_input_ids=calibration_input_ids)
-    maskModel(model, attnMask=attnMask, mlpMask=mlpMask)
+    # attnMask, mlpMask = second_stage_attention(model, num_prune=num_attn_submodules_to_prune, calibration_input_ids=calibration_input_ids)
+    # maskModel(model, attnMask=attnMask, mlpMask=mlpMask)
     
     return model

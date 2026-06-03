@@ -430,6 +430,7 @@ def second_stage_attention(model, num_prune, calibration_input_ids):
   mlpMask = [0] * num_blocks
   
   ppl = evaluate_perplexity(model, calibration_input_ids, seq_len=2048, enable_tqdm=False)
+  print("PPL value",ppl)
   logging.debug(f"Original perplexity: {ppl}")
 
   for _ in tqdm(range(num_prune), desc="Second stage"):
