@@ -7,6 +7,7 @@
   padding: 20px;
   background: #f9f9f9;
   border-radius: 10px;
+  color: #333;
 }
 
 .container.disabled {
@@ -63,6 +64,7 @@
   border: 2px solid #e0e0e0;
   border-radius: 8px;
   background: white;
+  color: #333;
   cursor: pointer;
   transition: all 0.3s ease;
   font-weight: 600;
@@ -75,9 +77,16 @@
 .methodBtn:hover:not(:disabled) {
   border-color: #667eea;
   background: #f0f4ff;
+  color: #333;
 }
 
 .methodBtn.active {
+  border-color: #667eea;
+  background: #667eea;
+  color: white;
+}
+
+.methodBtn.active:hover:not(:disabled) {
   border-color: #667eea;
   background: #667eea;
   color: white;
@@ -90,10 +99,12 @@
 
 .methodDesc {
   font-size: 0.85rem;
+  color: #666;
   opacity: 0.7;
 }
 
 .methodBtn.active .methodDesc {
+  color: white;
   opacity: 1;
 }
 
@@ -153,6 +164,8 @@
   border: 1px solid #e0e0e0;
   border-radius: 5px;
   font-size: 1rem;
+  color: #333;
+  background: white;
   width: 100px;
 }
 

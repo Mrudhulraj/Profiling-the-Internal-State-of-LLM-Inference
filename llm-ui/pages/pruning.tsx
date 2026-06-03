@@ -215,6 +215,10 @@ const PruningPage: React.FC = () => {
           <div
             className={`${styles.step} ${
               currentStep === 'configuration' ? styles.active : ''
+            } ${
+              currentStep === 'running' || currentStep === 'results'
+                ? styles.completed
+                : ''
             }`}
           >
             <div className={styles.stepNumber}>3</div>

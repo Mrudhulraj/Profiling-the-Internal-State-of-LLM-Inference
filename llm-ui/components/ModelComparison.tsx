@@ -42,6 +42,32 @@ const formatNumber = (num: number): string => {
   return num.toLocaleString()
 }
 
+const formatParameterCount = (num: number): string => {
+  const absNum = Math.abs(num)
+
+  if (absNum >= 1_000_000_000) {
+    return `${(num / 1_000_000_000).toFixed(2)}B`
+  }
+
+  if (absNum >= 1_000_000) {
+    return `${(num / 1_000_000).toFixed(2)}M`
+  }
+
+  if (absNum >= 1_000) {
+    return `${(num / 1_000).toFixed(2)}K`
+  }
+
+  return formatNumber(num)
+}
+
+const formatModelSize = (sizeMb: number): string => {
+  if (sizeMb >= 1024) {
+    return `${(sizeMb / 1024).toFixed(2)} GB`
+  }
+
+  return `${sizeMb.toFixed(2)} MB`
+}
+
 const formatPct = (num: number): string => {
   return `${num.toFixed(2)}%`
 }
@@ -140,8 +166,12 @@ const ModelComparison: React.FC<ModelComparisonProps> = ({
           <tbody>
             <tr>
               <td>Total Parameters</td>
-              <td>{formatNumber(baseline_stats.total_parameters)}</td>
-              <td>{formatNumber(pruned_stats.total_parameters)}</td>
+              <td title={formatNumber(baseline_stats.total_parameters)}>
+                {formatParameterCount(baseline_stats.total_parameters)}
+              </td>
+              <td title={formatNumber(pruned_stats.total_parameters)}>
+                {formatParameterCount(pruned_stats.total_parameters)}
+              </td>
               <td className={styles.positive}>
                 -{formatPct(comparison.parameter_reduction_percent)}
               </td>
@@ -149,8 +179,12 @@ const ModelComparison: React.FC<ModelComparisonProps> = ({
 
             <tr>
               <td>Model Parameters</td>
-              <td>{formatNumber(baseline_stats.main_model_parameters)}</td>
-              <td>{formatNumber(pruned_stats.main_model_parameters)}</td>
+              <td title={formatNumber(baseline_stats.main_model_parameters)}>
+                {formatParameterCount(baseline_stats.main_model_parameters)}
+              </td>
+              <td title={formatNumber(pruned_stats.main_model_parameters)}>
+                {formatParameterCount(pruned_stats.main_model_parameters)}
+              </td>
               <td className={styles.positive}>
                 -{formatPct(
                   ((baseline_stats.main_model_parameters -
@@ -160,6 +194,20 @@ const ModelComparison: React.FC<ModelComparisonProps> = ({
                 )}
               </td>
             </tr>
+
+            {baseline_stats.file_size_mb !== undefined &&
+              pruned_stats.file_size_mb !== undefined && (
+                <tr>
+                  <td>File Size</td>
+                  <td>{formatModelSize(baseline_stats.file_size_mb)}</td>
+                  <td>{formatModelSize(pruned_stats.file_size_mb)}</td>
+                  <td className={styles.positive}>
+                    {comparison.size_reduction_percent !== undefined
+                      ? `-${formatPct(comparison.size_reduction_percent)}`
+                      : 'N/A'}
+                  </td>
+                </tr>
+              )}
 
             {baseline_stats.metrics.perplexity !== undefined && (
               <tr>
@@ -219,7 +267,7 @@ const ModelComparison: React.FC<ModelComparisonProps> = ({
             <div className={styles.detail}>
               <span className={styles.label}>File Size:</span>
               <span className={styles.value}>
-                {pruned_stats.file_size_mb.toFixed(2)} MB
+                {formatModelSize(pruned_stats.file_size_mb)}
               </span>
             </div>
           )}
