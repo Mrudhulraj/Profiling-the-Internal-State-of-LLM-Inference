@@ -15,7 +15,7 @@ import {
   startPruning, 
   getPruningJob,
   computeModelStats,
-  generateFromPrunedModel,
+  compareModelGenerations,
   PruningConfigRequest,
   PruningJobResponse
 } from '../utils/pruningApi'
@@ -62,7 +62,9 @@ const PruningPage: React.FC = () => {
 
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null)
   const [interactionPrompt, setInteractionPrompt] = useState('')
-  const [interactionOutput, setInteractionOutput] = useState('')
+  const [comparisonPrompt, setComparisonPrompt] = useState('')
+  const [baselineInteractionOutput, setBaselineInteractionOutput] = useState('')
+  const [prunedInteractionOutput, setPrunedInteractionOutput] = useState('')
   const [interactionLoading, setInteractionLoading] = useState(false)
   const [interactionError, setInteractionError] = useState<string | null>(null)
 
@@ -159,7 +161,9 @@ const PruningPage: React.FC = () => {
     setSelectedModel(null)
     setSelectedDataset(null)
     setInteractionPrompt('')
-    setInteractionOutput('')
+    setComparisonPrompt('')
+    setBaselineInteractionOutput('')
+    setPrunedInteractionOutput('')
     setInteractionError(null)
     setInteractionLoading(false)
     setJobStatus({
@@ -173,7 +177,7 @@ const PruningPage: React.FC = () => {
     }
   }
 
-  const handleGenerateFromPrunedModel = async () => {
+  const handleCompareModelGenerations = async () => {
     const prompt = interactionPrompt.trim()
     if (!jobStatus.jobId || !prompt) {
       setInteractionError('Enter a prompt first.')
@@ -183,24 +187,31 @@ const PruningPage: React.FC = () => {
     try {
       setInteractionLoading(true)
       setInteractionError(null)
-      setInteractionOutput('')
+      setComparisonPrompt(prompt)
+      setBaselineInteractionOutput('')
+      setPrunedInteractionOutput('')
 
-      const response = await generateFromPrunedModel({
+      const response = await compareModelGenerations({
         job_id: jobStatus.jobId,
         prompt,
-        max_new_tokens: 128,
+        max_new_tokens: 256,
         temperature: 0.7,
         top_p: 0.9,
         use_chat_template: true,
       })
 
-      setInteractionOutput(response.generated_text || 'The model returned an empty response.')
+      setBaselineInteractionOutput(
+        response.baseline_generated_text || 'The baseline model returned an empty response.'
+      )
+      setPrunedInteractionOutput(
+        response.pruned_generated_text || 'The pruned model returned an empty response.'
+      )
     } catch (error: any) {
       const detail = error?.response?.data?.detail
       setInteractionError(
         typeof detail === 'string'
           ? detail
-          : 'Unable to generate from this pruned model.'
+          : 'Unable to compare these models.'
       )
     } finally {
       setInteractionLoading(false)
@@ -400,16 +411,16 @@ const PruningPage: React.FC = () => {
 
                     <div className={styles.interactionPanel}>
                       <div className={styles.interactionHeader}>
-                        <h3>Try the Pruned Model</h3>
+                        <h3>Compare Baseline and Pruned Models</h3>
                         <p>
-                          Send a prompt to the pruned model from this completed job.
+                          Send the same prompt to the original selected model and the pruned model.
                         </p>
                       </div>
 
                       <textarea
                         value={interactionPrompt}
                         onChange={(event) => setInteractionPrompt(event.target.value)}
-                        placeholder="Ask the pruned model something..."
+                        placeholder="Enter a prompt to compare both models..."
                         className={styles.promptInput}
                         rows={5}
                         disabled={interactionLoading}
@@ -417,11 +428,11 @@ const PruningPage: React.FC = () => {
 
                       <div className={styles.interactionActions}>
                         <button
-                          onClick={handleGenerateFromPrunedModel}
+                          onClick={handleCompareModelGenerations}
                           disabled={interactionLoading || !interactionPrompt.trim()}
                           className={styles.generateButton}
                         >
-                          {interactionLoading ? 'Generating...' : 'Generate Response'}
+                          {interactionLoading ? 'Generating...' : 'Compare Responses'}
                         </button>
                       </div>
 
@@ -431,10 +442,36 @@ const PruningPage: React.FC = () => {
                         </div>
                       )}
 
-                      {interactionOutput && (
-                        <div className={styles.generationOutput}>
-                          <h4>Response</h4>
-                          <p>{interactionOutput}</p>
+                      {(interactionLoading ||
+                        baselineInteractionOutput ||
+                        prunedInteractionOutput) && (
+                        <div className={styles.generationCompareGrid}>
+                          <div className={styles.chatPane}>
+                            <div className={styles.chatPaneHeader}>Baseline Model</div>
+                            <div className={styles.chatMessages}>
+                              <div className={`${styles.chatBubble} ${styles.userBubble}`}>
+                                {comparisonPrompt}
+                              </div>
+                              <div className={`${styles.chatBubble} ${styles.modelBubble}`}>
+                                {interactionLoading
+                                  ? 'Generating baseline response...'
+                                  : baselineInteractionOutput}
+                              </div>
+                            </div>
+                          </div>
+                          <div className={styles.chatPane}>
+                            <div className={styles.chatPaneHeader}>Pruned Model</div>
+                            <div className={styles.chatMessages}>
+                              <div className={`${styles.chatBubble} ${styles.userBubble}`}>
+                                {comparisonPrompt}
+                              </div>
+                              <div className={`${styles.chatBubble} ${styles.modelBubble}`}>
+                                {interactionLoading
+                                  ? 'Generating pruned response...'
+                                  : prunedInteractionOutput}
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>

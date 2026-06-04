@@ -159,6 +159,15 @@ class GenerationResponse(BaseModel):
     generated_text: str
 
 
+class GenerationComparisonResponse(BaseModel):
+    """Side-by-side generated text from baseline and pruned models."""
+    job_id: str
+    model_id: str
+    prompt: str
+    baseline_generated_text: str
+    pruned_generated_text: str
+
+
 # ============================================================================
 # IN-MEMORY JOB TRACKING
 # ============================================================================
@@ -195,6 +204,7 @@ class JobTracker:
 
 job_tracker = JobTracker()
 loaded_pruned_models: Dict[str, Dict[str, Any]] = {}
+loaded_baseline_models: Dict[str, Dict[str, Any]] = {}
 
 
 # ============================================================================
@@ -279,6 +289,11 @@ def cache_pruned_model(job_id: str, model, tokenizer, model_id: str):
             del loaded_pruned_models[cached_job_id]
             removed_cached_model = True
 
+    for cached_job_id in list(loaded_baseline_models.keys()):
+        if cached_job_id != job_id:
+            del loaded_baseline_models[cached_job_id]
+            removed_cached_model = True
+
     if removed_cached_model:
         torch.cuda.empty_cache()
 
@@ -289,6 +304,69 @@ def cache_pruned_model(job_id: str, model, tokenizer, model_id: str):
         "model_id": model_id,
         "cached_at": datetime.now().isoformat(),
     }
+
+
+def get_or_load_baseline_model(job_id: str, model_id: str, tokenizer) -> Dict[str, Any]:
+    """Load and cache the original selected model for side-by-side comparison."""
+    cached = loaded_baseline_models.get(job_id)
+    if cached:
+        return cached
+
+    logger.info(f"Loading baseline model for comparison: {model_id}")
+    model = loadModel(model_id)
+    model.eval()
+    loaded_baseline_models[job_id] = {
+        "model": model,
+        "tokenizer": tokenizer,
+        "model_id": model_id,
+        "cached_at": datetime.now().isoformat(),
+    }
+    return loaded_baseline_models[job_id]
+
+
+def render_generation_prompt(tokenizer, prompt: str, use_chat_template: bool) -> str:
+    """Apply a chat template when available, otherwise use the raw prompt."""
+    if use_chat_template and getattr(tokenizer, "chat_template", None):
+        try:
+            return tokenizer.apply_chat_template(
+                [{"role": "user", "content": prompt}],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        except Exception as e:
+            logger.warning(f"Could not apply chat template, using raw prompt: {e}")
+
+    return prompt
+
+
+def generate_text(model, tokenizer, prompt: str, request: GenerationRequest) -> str:
+    """Generate only the completion text for a prompt."""
+    prompt_text = render_generation_prompt(tokenizer, prompt, request.use_chat_template)
+    inputs = tokenizer(prompt_text, return_tensors="pt")
+    input_device = get_model_input_device(model)
+    inputs = {key: value.to(input_device) for key, value in inputs.items()}
+
+    generation_kwargs = {
+        "max_new_tokens": request.max_new_tokens,
+        "do_sample": request.temperature > 0,
+        "eos_token_id": tokenizer.eos_token_id,
+        "pad_token_id": (
+            tokenizer.pad_token_id
+            if tokenizer.pad_token_id is not None
+            else tokenizer.eos_token_id
+        ),
+    }
+
+    if request.temperature > 0:
+        generation_kwargs["temperature"] = request.temperature
+        generation_kwargs["top_p"] = request.top_p
+
+    with torch.no_grad():
+        output_ids = model.generate(**inputs, **generation_kwargs)
+
+    prompt_token_count = inputs["input_ids"].shape[-1]
+    generated_ids = output_ids[0][prompt_token_count:]
+    return tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
 
 
 # ============================================================================
@@ -675,42 +753,8 @@ async def generate_with_pruned_model(request: GenerationRequest):
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt cannot be empty")
 
-    prompt_text = prompt
-    if request.use_chat_template and getattr(tokenizer, "chat_template", None):
-        try:
-            prompt_text = tokenizer.apply_chat_template(
-                [{"role": "user", "content": prompt}],
-                tokenize=False,
-                add_generation_prompt=True,
-            )
-        except Exception as e:
-            logger.warning(f"Could not apply chat template, using raw prompt: {e}")
-
-    inputs = tokenizer(prompt_text, return_tensors="pt")
-    input_device = get_model_input_device(model)
-    inputs = {key: value.to(input_device) for key, value in inputs.items()}
-
-    generation_kwargs = {
-        "max_new_tokens": request.max_new_tokens,
-        "do_sample": request.temperature > 0,
-        "eos_token_id": tokenizer.eos_token_id,
-        "pad_token_id": (
-            tokenizer.pad_token_id
-            if tokenizer.pad_token_id is not None
-            else tokenizer.eos_token_id
-        ),
-    }
-
-    if request.temperature > 0:
-        generation_kwargs["temperature"] = request.temperature
-        generation_kwargs["top_p"] = request.top_p
-
     try:
-        with torch.no_grad():
-            output_ids = model.generate(**inputs, **generation_kwargs)
-        prompt_token_count = inputs["input_ids"].shape[-1]
-        generated_ids = output_ids[0][prompt_token_count:]
-        generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+        generated_text = generate_text(model, tokenizer, prompt, request)
 
         return GenerationResponse(
             job_id=request.job_id,
@@ -723,18 +767,89 @@ async def generate_with_pruned_model(request: GenerationRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/inference/compare", response_model=GenerationComparisonResponse)
+async def compare_baseline_and_pruned_models(request: GenerationRequest):
+    """Generate side-by-side responses from the selected baseline and pruned model."""
+    job = job_tracker.get_job(request.job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status != "completed":
+        raise HTTPException(status_code=409, detail="Pruning job is not completed yet")
+
+    pruned_cached = loaded_pruned_models.get(request.job_id)
+    if not pruned_cached:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Pruned model is not loaded in backend memory. "
+                "Rerun pruning or restart from a job that has just completed."
+            ),
+        )
+
+    prompt = request.prompt.strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty")
+
+    try:
+        baseline_cached = get_or_load_baseline_model(
+            request.job_id,
+            job.model_id,
+            pruned_cached["tokenizer"],
+        )
+    except Exception as e:
+        logger.error(f"Error loading baseline model for {request.job_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not load baseline model for comparison: {str(e)}",
+        )
+
+    try:
+        baseline_generated_text = generate_text(
+            baseline_cached["model"],
+            baseline_cached["tokenizer"],
+            prompt,
+            request,
+        )
+        pruned_generated_text = generate_text(
+            pruned_cached["model"],
+            pruned_cached["tokenizer"],
+            prompt,
+            request,
+        )
+
+        return GenerationComparisonResponse(
+            job_id=request.job_id,
+            model_id=job.model_id,
+            prompt=prompt,
+            baseline_generated_text=baseline_generated_text,
+            pruned_generated_text=pruned_generated_text,
+        )
+    except Exception as e:
+        logger.error(f"Error comparing model generations {request.job_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/api/inference/unload/{job_id}")
 async def unload_pruned_model(job_id: str) -> Dict:
     """Unload a cached pruned model from memory."""
-    if job_id not in loaded_pruned_models:
+    removed_model = False
+    if job_id in loaded_pruned_models:
+        del loaded_pruned_models[job_id]
+        removed_model = True
+
+    if job_id in loaded_baseline_models:
+        del loaded_baseline_models[job_id]
+        removed_model = True
+
+    if not removed_model:
         raise HTTPException(status_code=404, detail="Pruned model is not loaded")
 
-    del loaded_pruned_models[job_id]
     torch.cuda.empty_cache()
 
     return {
         "status": "success",
-        "message": f"Unloaded pruned model for job {job_id}",
+        "message": f"Unloaded cached models for job {job_id}",
     }
 
 

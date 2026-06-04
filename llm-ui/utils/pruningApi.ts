@@ -240,6 +240,14 @@ export interface GeneratePrunedModelResponse {
   generated_text: string
 }
 
+export interface CompareModelGenerationsResponse {
+  job_id: string
+  model_id: string
+  prompt: string
+  baseline_generated_text: string
+  pruned_generated_text: string
+}
+
 export const generateFromPrunedModel = async (
   request: GeneratePrunedModelRequest
 ): Promise<GeneratePrunedModelResponse> => {
@@ -248,6 +256,18 @@ export const generateFromPrunedModel = async (
     return response.data
   } catch (error) {
     console.error('Error generating from pruned model:', error)
+    throw error
+  }
+}
+
+export const compareModelGenerations = async (
+  request: GeneratePrunedModelRequest
+): Promise<CompareModelGenerationsResponse> => {
+  try {
+    const response = await pruningApi.post('/inference/compare', request)
+    return response.data
+  } catch (error) {
+    console.error('Error comparing model generations:', error)
     throw error
   }
 }
