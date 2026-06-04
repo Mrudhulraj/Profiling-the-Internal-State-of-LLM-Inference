@@ -15,6 +15,7 @@ import {
   startPruning, 
   getPruningJob,
   computeModelStats,
+  generateFromPrunedModel,
   PruningConfigRequest,
   PruningJobResponse
 } from '../utils/pruningApi'
@@ -60,6 +61,10 @@ const PruningPage: React.FC = () => {
   })
 
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null)
+  const [interactionPrompt, setInteractionPrompt] = useState('')
+  const [interactionOutput, setInteractionOutput] = useState('')
+  const [interactionLoading, setInteractionLoading] = useState(false)
+  const [interactionError, setInteractionError] = useState<string | null>(null)
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -153,6 +158,10 @@ const PruningPage: React.FC = () => {
     setCurrentStep('model-selection')
     setSelectedModel(null)
     setSelectedDataset(null)
+    setInteractionPrompt('')
+    setInteractionOutput('')
+    setInteractionError(null)
+    setInteractionLoading(false)
     setJobStatus({
       jobId: '',
       status: 'pending',
@@ -161,6 +170,40 @@ const PruningPage: React.FC = () => {
     })
     if (pollingInterval) {
       clearInterval(pollingInterval)
+    }
+  }
+
+  const handleGenerateFromPrunedModel = async () => {
+    const prompt = interactionPrompt.trim()
+    if (!jobStatus.jobId || !prompt) {
+      setInteractionError('Enter a prompt first.')
+      return
+    }
+
+    try {
+      setInteractionLoading(true)
+      setInteractionError(null)
+      setInteractionOutput('')
+
+      const response = await generateFromPrunedModel({
+        job_id: jobStatus.jobId,
+        prompt,
+        max_new_tokens: 128,
+        temperature: 0.7,
+        top_p: 0.9,
+        use_chat_template: true,
+      })
+
+      setInteractionOutput(response.generated_text || 'The model returned an empty response.')
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail
+      setInteractionError(
+        typeof detail === 'string'
+          ? detail
+          : 'Unable to generate from this pruned model.'
+      )
+    } finally {
+      setInteractionLoading(false)
     }
   }
 
@@ -354,6 +397,47 @@ const PruningPage: React.FC = () => {
                         comparison: jobStatus.data.job.comparison!,
                       }}
                     />
+
+                    <div className={styles.interactionPanel}>
+                      <div className={styles.interactionHeader}>
+                        <h3>Try the Pruned Model</h3>
+                        <p>
+                          Send a prompt to the pruned model from this completed job.
+                        </p>
+                      </div>
+
+                      <textarea
+                        value={interactionPrompt}
+                        onChange={(event) => setInteractionPrompt(event.target.value)}
+                        placeholder="Ask the pruned model something..."
+                        className={styles.promptInput}
+                        rows={5}
+                        disabled={interactionLoading}
+                      />
+
+                      <div className={styles.interactionActions}>
+                        <button
+                          onClick={handleGenerateFromPrunedModel}
+                          disabled={interactionLoading || !interactionPrompt.trim()}
+                          className={styles.generateButton}
+                        >
+                          {interactionLoading ? 'Generating...' : 'Generate Response'}
+                        </button>
+                      </div>
+
+                      {interactionError && (
+                        <div className={styles.generationError}>
+                          {interactionError}
+                        </div>
+                      )}
+
+                      {interactionOutput && (
+                        <div className={styles.generationOutput}>
+                          <h4>Response</h4>
+                          <p>{interactionOutput}</p>
+                        </div>
+                      )}
+                    </div>
 
                     <div className={styles.resultsActions}>
                       <button

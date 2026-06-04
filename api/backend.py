@@ -141,6 +141,24 @@ class PruningResult(BaseModel):
     created_at: str
 
 
+class GenerationRequest(BaseModel):
+    """Text generation request for a completed pruning job."""
+    job_id: str
+    prompt: str = Field(..., min_length=1)
+    max_new_tokens: int = Field(default=128, ge=1, le=512)
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    top_p: float = Field(default=0.9, ge=0.0, le=1.0)
+    use_chat_template: bool = True
+
+
+class GenerationResponse(BaseModel):
+    """Generated text response from a pruned model."""
+    job_id: str
+    model_id: str
+    prompt: str
+    generated_text: str
+
+
 # ============================================================================
 # IN-MEMORY JOB TRACKING
 # ============================================================================
@@ -176,6 +194,7 @@ class JobTracker:
 
 
 job_tracker = JobTracker()
+loaded_pruned_models: Dict[str, Dict[str, Any]] = {}
 
 
 # ============================================================================
@@ -243,6 +262,33 @@ def compare_models(baseline_stats: ModelStats, pruned_stats: ModelStats) -> Dict
         comparison['speedup'] = speedup
     
     return comparison
+
+
+def get_model_input_device(model) -> torch.device:
+    """Return the device where prompt tensors should be placed."""
+    if hasattr(model, "device"):
+        return model.device
+    return next(model.parameters()).device
+
+
+def cache_pruned_model(job_id: str, model, tokenizer, model_id: str):
+    """Keep the latest pruned model available for interactive generation."""
+    removed_cached_model = False
+    for cached_job_id in list(loaded_pruned_models.keys()):
+        if cached_job_id != job_id:
+            del loaded_pruned_models[cached_job_id]
+            removed_cached_model = True
+
+    if removed_cached_model:
+        torch.cuda.empty_cache()
+
+    model.eval()
+    loaded_pruned_models[job_id] = {
+        "model": model,
+        "tokenizer": tokenizer,
+        "model_id": model_id,
+        "cached_at": datetime.now().isoformat(),
+    }
 
 
 # ============================================================================
@@ -555,11 +601,13 @@ def execute_pruning(job_id: str, config: PruningConfig):
             pruned_stats=pruned_stats,
             comparison=comparison,
         )
+        cache_pruned_model(job_id, pruned_model, tokenizer, config.model_id)
         
         logger.info(f"Pruning job completed: {job_id}")
         
         # Cleanup
-        del model, pruned_model, tokenizer
+        if model is not pruned_model:
+            del model
         torch.cuda.empty_cache()
         
     except Exception as e:
@@ -590,6 +638,100 @@ async def list_pruning_jobs() -> Dict:
     return {
         "jobs": [job.dict() for job in jobs],
         "total": len(jobs),
+    }
+
+
+# ============================================================================
+# API ENDPOINTS: INFERENCE
+# ============================================================================
+
+@app.post("/api/inference/generate", response_model=GenerationResponse)
+async def generate_with_pruned_model(request: GenerationRequest):
+    """Generate text with the pruned model produced by a completed job."""
+    job = job_tracker.get_job(request.job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status != "completed":
+        raise HTTPException(status_code=409, detail="Pruning job is not completed yet")
+
+    cached = loaded_pruned_models.get(request.job_id)
+    if not cached:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Pruned model is not loaded in backend memory. "
+                "Rerun pruning or restart from a job that has just completed."
+            ),
+        )
+
+    model = cached["model"]
+    tokenizer = cached["tokenizer"]
+    prompt = request.prompt.strip()
+
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty")
+
+    prompt_text = prompt
+    if request.use_chat_template and getattr(tokenizer, "chat_template", None):
+        try:
+            prompt_text = tokenizer.apply_chat_template(
+                [{"role": "user", "content": prompt}],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        except Exception as e:
+            logger.warning(f"Could not apply chat template, using raw prompt: {e}")
+
+    inputs = tokenizer(prompt_text, return_tensors="pt")
+    input_device = get_model_input_device(model)
+    inputs = {key: value.to(input_device) for key, value in inputs.items()}
+
+    generation_kwargs = {
+        "max_new_tokens": request.max_new_tokens,
+        "do_sample": request.temperature > 0,
+        "eos_token_id": tokenizer.eos_token_id,
+        "pad_token_id": (
+            tokenizer.pad_token_id
+            if tokenizer.pad_token_id is not None
+            else tokenizer.eos_token_id
+        ),
+    }
+
+    if request.temperature > 0:
+        generation_kwargs["temperature"] = request.temperature
+        generation_kwargs["top_p"] = request.top_p
+
+    try:
+        with torch.no_grad():
+            output_ids = model.generate(**inputs, **generation_kwargs)
+        prompt_token_count = inputs["input_ids"].shape[-1]
+        generated_ids = output_ids[0][prompt_token_count:]
+        generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+
+        return GenerationResponse(
+            job_id=request.job_id,
+            model_id=cached["model_id"],
+            prompt=prompt,
+            generated_text=generated_text,
+        )
+    except Exception as e:
+        logger.error(f"Error generating from pruned model {request.job_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/inference/unload/{job_id}")
+async def unload_pruned_model(job_id: str) -> Dict:
+    """Unload a cached pruned model from memory."""
+    if job_id not in loaded_pruned_models:
+        raise HTTPException(status_code=404, detail="Pruned model is not loaded")
+
+    del loaded_pruned_models[job_id]
+    torch.cuda.empty_cache()
+
+    return {
+        "status": "success",
+        "message": f"Unloaded pruned model for job {job_id}",
     }
 
 

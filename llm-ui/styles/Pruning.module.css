@@ -280,6 +280,113 @@
   font-size: 1.8rem;
 }
 
+.interactionPanel {
+  background: #f8f9ff;
+  border-left: 5px solid #667eea;
+  border-radius: 10px;
+  padding: 28px;
+  margin: 36px 0 0;
+  color: #333;
+}
+
+.interactionHeader {
+  margin-bottom: 18px;
+}
+
+.interactionHeader h3 {
+  margin: 0 0 8px 0;
+  color: #333;
+  font-size: 1.4rem;
+}
+
+.interactionHeader p {
+  margin: 0;
+  color: #666;
+  font-size: 1rem;
+}
+
+.promptInput {
+  width: 100%;
+  min-height: 120px;
+  padding: 14px 16px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  background: white;
+  color: #333;
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.promptInput:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.12);
+}
+
+.promptInput::placeholder {
+  color: #999;
+}
+
+.interactionActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.generateButton {
+  padding: 12px 30px;
+  border: none;
+  border-radius: 8px;
+  background: #667eea;
+  color: white;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.generateButton:hover:not(:disabled) {
+  background: #5568d3;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.generateButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.generationError {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.generationOutput {
+  margin-top: 20px;
+  padding: 20px;
+  border-radius: 8px;
+  background: white;
+  color: #333;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.06);
+}
+
+.generationOutput h4 {
+  margin: 0 0 10px 0;
+  color: #333;
+}
+
+.generationOutput p {
+  margin: 0;
+  color: #333;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
 .errorBanner {
   display: flex;
   flex-direction: column;
@@ -352,9 +459,18 @@
     flex-direction: column;
   }
 
+  .interactionPanel {
+    padding: 22px;
+  }
+
+  .interactionActions {
+    justify-content: stretch;
+  }
+
   .backButton,
   .nextButton,
-  .startButton {
+  .startButton,
+  .generateButton {
     width: 100%;
   }
 

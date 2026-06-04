@@ -174,6 +174,9 @@ export interface PruningJobResponse {
       model_type: string
       total_parameters: number
       main_model_parameters: number
+      file_size_mb?: number
+      pruning_method?: string
+      sparsity_rate?: number
       metrics: Record<string, any>
     }
     pruned_stats?: {
@@ -181,6 +184,9 @@ export interface PruningJobResponse {
       model_type: string
       total_parameters: number
       main_model_parameters: number
+      file_size_mb?: number
+      pruning_method?: string
+      sparsity_rate?: number
       metrics: Record<string, any>
     }
     comparison?: {
@@ -210,6 +216,38 @@ export const listPruningJobs = async (): Promise<any> => {
     return response.data
   } catch (error) {
     console.error('Error listing pruning jobs:', error)
+    throw error
+  }
+}
+
+// ============================================================================
+// INFERENCE ENDPOINTS
+// ============================================================================
+
+export interface GeneratePrunedModelRequest {
+  job_id: string
+  prompt: string
+  max_new_tokens?: number
+  temperature?: number
+  top_p?: number
+  use_chat_template?: boolean
+}
+
+export interface GeneratePrunedModelResponse {
+  job_id: string
+  model_id: string
+  prompt: string
+  generated_text: string
+}
+
+export const generateFromPrunedModel = async (
+  request: GeneratePrunedModelRequest
+): Promise<GeneratePrunedModelResponse> => {
+  try {
+    const response = await pruningApi.post('/inference/generate', request)
+    return response.data
+  } catch (error) {
+    console.error('Error generating from pruned model:', error)
     throw error
   }
 }
