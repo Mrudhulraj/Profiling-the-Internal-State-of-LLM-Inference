@@ -301,7 +301,10 @@ async def get_available_models() -> Dict[str, List[str]]:
     return {
         "available_models": [
             "meta-llama/Llama-3.2-3B-Instruct",
-            "meta-llama/Llama-7B-Instruct", 
+            "meta-llama/Llama-3.2-1B-Instruct",
+            "meta-llama/Llama-2-7b-hf",
+            "meta-llama/Llama-2-13b-hf",
+            "meta-llama/Llama-3.1-8B",
         ]
     }
 

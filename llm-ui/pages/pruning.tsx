@@ -450,7 +450,7 @@ const PruningPage: React.FC = () => {
                         }}
                         className={styles.downloadButton}
                       >
-                        📥 Download Pruned Model
+                        Download Pruned Model
                       </button>
                       <button
                         onClick={() => {
@@ -462,13 +462,13 @@ const PruningPage: React.FC = () => {
                         }}
                         className={styles.exportButton}
                       >
-                        📊 Export Results
+                        Export Results
                       </button>
                       <button
                         onClick={handleReset}
                         className={styles.resetButton}
                       >
-                        🔄 Try Another Model
+                        Try Another Model
                       </button>
                     </div>
                   </>
