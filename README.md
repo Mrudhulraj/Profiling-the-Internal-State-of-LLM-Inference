@@ -1,3 +1,20 @@
+# Purpose of the Project
+The goal of this project is to improve the efficiency of large language models (LLMs) by reducing computational cost, memory usage, and inference latency while maintaining acceptable performance.
+
+This is achieved through a three-stage model optimization pipeline consisting of:
+
+**FLAP Pruning**: Performs structured pruning to reduce the number of active model parameters based on a configurable pruning ratio. Higher pruning ratios lead to smaller models with lower computational and memory requirements, and faster inference.
+**SliceGPT Transformation**: Applies structural model compression to further reduce model width and improve runtime efficiency while preserving essential representational capacity.
+**LoRA Fine-Tuning**: Performs parameter-efficient fine-tuning using Low-Rank Adaptation (LoRA) to recover performance after compression and adapt the model to the provided dataset.
+
+The pipeline takes the following key inputs:
+
+1. A dataset used as the knowledge base for pruning-aware and fine-tuning stages
+2. A pruning ratio that determines the level of compression applied
+3. The number of fine-tuning steps controlling adaptation strength on the target dataset
+
+The final output is a compressed and optimized LLM with reduced computational requirements and competitive task performance.
+
 # Getting Started with LLM Inference Benchmarking Tool
 
 This project has two runtime paths:
@@ -156,3 +173,11 @@ curl -X POST http://localhost:30080/v1/chat/completions \
     ]
   }'
 ```
+
+
+# Known Limitations
+
+1. Performance degradation under high compression: Aggressive pruning and slicing can lead to noticeable reductions in model accuracy, particularly on complex reasoning tasks.
+2. Incomplete performance recovery: LoRA fine-tuning mitigates but does not fully restore the performance lost during compression stages.
+3. Sensitivity to hyperparameters: The final model quality is highly dependent on pruning ratio, SliceGPT configuration, LoRA rank, learning rate, and training steps.
+4. No direct energy measurement: Energy efficiency improvements are inferred from proxy metrics such as parameter count, FLOPs reduction, and inference latency rather than directly measured hardware energy consumption.
