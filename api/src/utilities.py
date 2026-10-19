@@ -7,6 +7,7 @@ from transformers import AutoModelForCausalLM
 from tqdm import tqdm
 from .evaluation import evaluate_perplexity
 import os
+from google.colab import userdata
 """
 Sets a fixed seed for the reproducibility of the results
 """
@@ -40,7 +41,7 @@ def loadModel(model_name, cache_dir=None):
     dtype = torch.bfloat16
   else:
     dtype = torch.float16
-  os.environ["HF_TOKEN"] = "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"
+  os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")
   model = AutoModelForCausalLM.from_pretrained(
     model_name,
     use_cache=False,

@@ -407,8 +407,8 @@ async def load_model(model_name: str = Query(...)):
         with open(os.path.join(RESULTS_DIR, f"model_{model_name.replace('/', '_')}.json"), 'w') as f:
             json.dump(model_info, f, indent=2)
         
-        del model
-        torch.cuda.empty_cache()
+        # del model
+        # torch.cuda.empty_cache()
         
         return {
             "status": "success",
