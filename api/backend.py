@@ -416,7 +416,7 @@ async def load_model(model_name: str = Query(...)):
             "stats": stats.dict(),
         }
     except Exception as e:
-        logger.error(f"Error loading model: {str(e)}")
+        logger.exception("Error loading model")
         raise HTTPException(status_code=500, detail=str(e))
 
 

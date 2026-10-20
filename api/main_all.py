@@ -163,7 +163,7 @@ def main():
   )
   
   set_seed(args.seed)
-  os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")
+  os.environ["HF_TOKEN"] = os.environ.get("HF_TOKEN")
 
   # Load the tokenizer
   logging.info("Loading the tokenizer")

@@ -41,7 +41,7 @@ def loadModel(model_name, cache_dir=None):
     dtype = torch.bfloat16
   else:
     dtype = torch.float16
-  os.environ["HF_TOKEN"] = userdata.get("HF_TOKEN")
+  os.environ["HF_TOKEN"] = os.environ.get("HF_TOKEN")
   model = AutoModelForCausalLM.from_pretrained(
     model_name,
     use_cache=False,
