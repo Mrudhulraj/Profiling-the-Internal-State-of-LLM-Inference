@@ -1,6 +1,29 @@
 from datasets import load_dataset, load_from_disk
 import logging
 
+def load_addition(train=True, n=200, seed=None):
+    if seed is None:
+        seed = 42 if train else 2026
+
+    rng = random.Random(seed)
+
+    examples = []
+
+    for _ in range(n):
+        a = rng.randint(100, 999)
+        b = rng.randint(100, 999)
+
+        prompt = f"What is {a}+{b}? Answer with just the number."
+        answer = str(a + b)
+
+        examples.append({
+            "prompt": prompt,
+            "answer": answer,
+            "text": f"{prompt} {answer}",
+        })
+
+    return Dataset.from_list(examples)
+
 def load_wikitext2(local=False):
   if local:
     dataset = load_from_disk("data/wikitext-2")

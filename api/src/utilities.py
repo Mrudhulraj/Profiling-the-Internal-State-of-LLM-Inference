@@ -8,6 +8,16 @@ from tqdm import tqdm
 from .evaluation import evaluate_perplexity
 import os
 from google.colab import userdata
+from dotenv import load_dotenv
+from pathlib import Path
+
+def get_env():
+    load_dotenv(
+        Path(__file__).resolve().parents[1] / ".env"
+    )
+
+    return  os.getenv("HF_TOKEN")
+
 """
 Sets a fixed seed for the reproducibility of the results
 """
@@ -41,7 +51,7 @@ def loadModel(model_name, cache_dir=None):
     dtype = torch.bfloat16
   else:
     dtype = torch.float16
-  os.environ["HF_TOKEN"] = os.environ.get("HF_TOKEN")
+  os.environ["HF_TOKEN"] = get_env()
   model = AutoModelForCausalLM.from_pretrained(
     model_name,
     use_cache=False,

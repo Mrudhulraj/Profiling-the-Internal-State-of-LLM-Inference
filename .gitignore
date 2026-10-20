@@ -1,5 +1,6 @@
 POC_compressor/rbac/
 POC_compressor/TinyLlama-Pruned-50/
+.env
 .venv/
 .claude/
 *.tar

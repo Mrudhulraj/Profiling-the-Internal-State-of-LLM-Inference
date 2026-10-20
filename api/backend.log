@@ -1,0 +1,13 @@
+nohup: ignoring input
+INFO:     Started server process [20045]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://localhost:8000 (Press CTRL+C to quit)
+INFO:     ::1:38394 - "GET /health HTTP/1.1" 200 OK
+2026-10-20 21:48:35,210 - INFO - Loading model: Qwen/Qwen2.5-0.5B-Instruct
+2026-10-20 21:48:35,210 - INFO - Loading the model
+2026-10-20 21:48:35,543 - INFO - HTTP Request: GET https://huggingface.co/api/models/Qwen/Qwen2.5-0.5B-Instruct "HTTP/1.1 200 OK"
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]Loading weights:   2%|▏         | 5/290 [00:00<00:05, 49.06it/s]Loading weights:  30%|███       | 88/290 [00:00<00:00, 496.02it/s]Loading weights:  63%|██████▎   | 184/290 [00:00<00:00, 692.59it/s]Loading weights:  93%|█████████▎| 269/290 [00:00<00:00, 751.10it/s]Loading weights: 100%|██████████| 290/290 [00:00<00:00, 687.22it/s]
+2026-10-20 21:48:37,436 - INFO - HTTP Request: HEAD https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct/resolve/main/custom_generate/generate.py "HTTP/1.1 404 Not Found"
+INFO:     ::1:38400 - "POST /api/models/load?model_name=Qwen/Qwen2.5-0.5B-Instruct HTTP/1.1" 200 OK
