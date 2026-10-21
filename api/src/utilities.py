@@ -7,7 +7,7 @@ from transformers import AutoModelForCausalLM
 from tqdm import tqdm
 from .evaluation import evaluate_perplexity
 import os
-from google.colab import userdata
+
 from dotenv import load_dotenv
 from pathlib import Path
 

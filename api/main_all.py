@@ -13,7 +13,6 @@ from src.pruning import *
 from src.evopress import *
 from src.slicegpt import *
 from src.ablations import *
-from google.colab import userdata
 
 
 def parse_args():
@@ -164,7 +163,7 @@ def main():
   
   set_seed(args.seed)
   os.environ["HF_TOKEN"] = os.environ.get("HF_TOKEN")
-
+  logging.info("Loading the environment variable",os.environ["HF_TOKEN"])
   # Load the tokenizer
   logging.info("Loading the tokenizer")
   tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True, use_fast=False)

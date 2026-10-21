@@ -37,7 +37,7 @@ from src.utilities import (
     loadModel, set_seed, printModelStats, 
     maskModel, unmaskModel, reset_mlps_shape
 )
-from src.dataset import get_calibration, load_wikitext2
+from src.dataset import get_calibration, load_wikitext2, load_addition
 from src.pruning import two_stage_2ssp, shortGPT
 from src.utilities import compute_intermediate_outputs
 
@@ -383,6 +383,7 @@ async def get_available_models() -> Dict[str, List[str]]:
             "meta-llama/Llama-2-7b-hf",
             "meta-llama/Llama-2-13b-hf",
             "meta-llama/Llama-3.1-8B",
+            "Qwen/Qwen2.5-0.5B-Instruct",
         ]
     }
 
@@ -430,6 +431,7 @@ async def get_available_datasets() -> Dict:
     return {
         "available_datasets": [
             "wikitext2",
+            "addition",
             "custom_upload",
         ]
     }
@@ -630,21 +632,46 @@ def execute_pruning(job_id: str, config: PruningConfig):
         except Exception as e:
             logger.warning(f"Could not measure baseline checkpoint size: {e}")
         
-        # Compute perplexity on baseline
-        tokenizer = AutoTokenizer.from_pretrained(config.model_id, trust_remote_code=True, use_fast=False)
-        dataset = load_wikitext2(local=False)
-        text = "\n\n".join(dataset["text"][:100])
-        input_ids = tokenizer(text, return_tensors="pt", add_special_tokens=False).input_ids
-        
-        baseline_ppl = evaluate_perplexity(model, input_ids, seq_len=2048, enable_tqdm=False)
-        baseline_stats.metrics['perplexity'] = baseline_ppl
-        
-        # Prepare calibration data
-        calibration_dataset = get_calibration(
-            dataset, tokenizer, 
-            num_samples=config.num_calibration_samples, 
-            seq_len=2048
+        # Use distinct addition problems for calibration and evaluation.
+        tokenizer = AutoTokenizer.from_pretrained(
+            config.model_id, trust_remote_code=True, use_fast=False
         )
+        if config.dataset_id == "addition":
+            calibration_source = load_addition(
+                train=True, n=config.num_calibration_samples, seed=config.seed
+            )
+            evaluation_source = load_addition(
+                train=False, n=200, seed=config.seed + 1_000_003
+            )
+        elif config.dataset_id == "wikitext2":
+            # Preserve existing WikiText-2 behavior for non-addition jobs.
+            calibration_source = load_wikitext2(local=False)
+            evaluation_source = calibration_source
+        else:
+            raise ValueError(f"Unsupported pruning dataset: {config.dataset_id}")
+
+        calibration_dataset = get_calibration(
+            calibration_source, tokenizer,
+            num_samples=config.num_calibration_samples,
+            seq_len=2048,
+        )
+        if not calibration_dataset:
+            raise ValueError("Calibration dataset produced no token sequences")
+
+        text = "\n\n".join(
+            row for row in evaluation_source["text"][:100]
+            if isinstance(row, str) and row.strip()
+        )
+        if not text:
+            raise ValueError("Evaluation dataset contains no text")
+        input_ids = tokenizer(
+            text, return_tensors="pt", add_special_tokens=False
+        ).input_ids
+
+        baseline_ppl = evaluate_perplexity(
+            model, input_ids, seq_len=2048, enable_tqdm=False
+        )
+        baseline_stats.metrics["perplexity"] = baseline_ppl
         
         # Apply pruning
         if config.pruning_method == "2ssp":
@@ -692,7 +719,7 @@ def execute_pruning(job_id: str, config: PruningConfig):
         torch.cuda.empty_cache()
         
     except Exception as e:
-        logger.error(f"Error in pruning job {job_id}: {str(e)}")
+        logger.exception("Error in pruning job %s", job_id)
         job_tracker.update_job(
             job_id,
             status="failed",

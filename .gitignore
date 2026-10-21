@@ -4,6 +4,4 @@ POC_compressor/TinyLlama-Pruned-50/
 .venv/
 .claude/
 *.tar
-llm-backend/*.tar
-llm-backend/
 api/*.yaml
