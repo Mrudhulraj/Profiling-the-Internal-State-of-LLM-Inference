@@ -5,3 +5,4 @@ POC_compressor/TinyLlama-Pruned-50/
 .claude/
 *.tar
 api/*.yaml
+__pycache__/

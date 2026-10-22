@@ -47,6 +47,25 @@ def parse_args():
 
   parser.add_argument('--local_datasets', help="Use local datasets stored in the './data/' folder", action='store_true')
   parser.add_argument(
+    '--calibration_dataset',
+    type=str,
+    choices=['c4', 'addition'],
+    default='c4',
+    help="Dataset used for pruning calibration (default: c4)"
+  )
+  parser.add_argument(
+    '--addition_samples',
+    type=int,
+    default=200,
+    help="Number of generated addition examples when --calibration_dataset=addition (default: 200)"
+  )
+  parser.add_argument(
+    '--save_pruned_dir',
+    type=str,
+    default=None,
+    help="Directory in which to save a physically pruned model (intended for 2SSP/SliceGPT)"
+  )
+  parser.add_argument(
     '--ablation', 
     action='store_true',
     help="Run the ablation study experiments"
@@ -188,7 +207,24 @@ def main():
   num_calibration_samples_2ssp = 32
   num_calibration_samples      = 256   # For SliceGPT, ShortGPT and Window Based
 
-  calibration_dataset      = get_calibration(dataset_c4_train, tokenizer, num_samples=num_calibration_samples, seq_len=2048)
+  # Choose calibration data independently from evaluation data.  Addition uses the
+  # exact prompt/answer text format used by the fine-tuning notebook.
+  if args.calibration_dataset == "addition":
+    logging.info("Using generated 3-digit addition examples for pruning calibration")
+    addition_train = load_addition(train=True, n=args.addition_samples, seed=42)
+    calibration_dataset = get_calibration(
+      addition_train, tokenizer,
+      num_samples=min(num_calibration_samples, args.addition_samples),
+      seq_len=128,
+    )
+  else:
+    calibration_dataset = get_calibration(
+      dataset_c4_train, tokenizer, num_samples=num_calibration_samples, seq_len=2048
+    )
+
+  if not calibration_dataset:
+    raise RuntimeError(f"No calibration samples produced for {args.calibration_dataset}")
+
   calibration_dataset_2ssp = calibration_dataset[:num_calibration_samples_2ssp]
   first_calibration_sample = calibration_dataset[0]
   
@@ -368,6 +404,35 @@ def main():
 
         # ── Summary table ──────────────────────────────────────────────
         print_summary_table(before_stats, after_stats)
+
+        # Save the physically pruned architecture before reset_mlps_shape().
+        # This checkpoint can be loaded directly by the GRPO/LoRA notebook.
+        if args.save_pruned_dir:
+          if len(pruning_rates) == 1:
+            save_dir = args.save_pruned_dir
+          else:
+            save_dir = os.path.join(
+              args.save_pruned_dir,
+              f"{pruning_method}_{target_sparsity:.4f}".replace(".", "p")
+            )
+          os.makedirs(save_dir, exist_ok=True)
+          model.save_pretrained(save_dir, safe_serialization=True)
+          tokenizer.save_pretrained(save_dir)
+          metadata = {
+            "base_model": args.model,
+            "pruning_method": pruning_method,
+            "target_sparsity": target_sparsity,
+            "calibration_dataset": args.calibration_dataset,
+            "calibration_samples": len(calibration_dataset_2ssp) if pruning_method == "2ssp" else len(calibration_dataset),
+            "total_params_before": before_total,
+            "total_params_after": after_total,
+            "main_params_before": before_main,
+            "main_params_after": after_main,
+          }
+          import json
+          with open(os.path.join(save_dir, "pruning_metadata.json"), "w") as f:
+            json.dump(metadata, f, indent=2)
+          logging.info(f"Saved pruned model + tokenizer to {save_dir}")
 
         reset_mlps_shape(model)
         del model
